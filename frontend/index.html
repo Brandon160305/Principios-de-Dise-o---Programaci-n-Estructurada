@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Comparación BD vs Caché - Spring Boot</title>
+    <style>
+        * { box-sizing: border-box; font-family: Arial, sans-serif; }
+        body { background-color: #f4f6f9; margin: 0; padding: 24px; color: #222; }
+        .container { max-width: 960px; margin: 0 auto; background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        h1 { margin-top: 0; font-size: 22px; color: #1e293b; }
+        p.subtitle { color: #64748b; margin-top: 4px; font-size: 14px; }
+        .buttons { display: flex; gap: 12px; margin: 20px 0; flex-wrap: wrap; }
+        button { padding: 10px 16px; border: none; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; transition: opacity 0.2s; }
+        button:hover { opacity: 0.9; }
+        .btn-db { background-color: #dc2626; color: white; }
+        .btn-cache { background-color: #16a34a; color: white; }
+        .btn-clear { background-color: #475569; color: white; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 20px; }
+        .card { background: #f8fafc; border: 1px solid #e2e8f0; padding: 14px; border-radius: 6px; }
+        .card-label { font-size: 12px; color: #64748b; text-transform: uppercase; }
+        .card-value { font-size: 22px; font-weight: bold; margin-top: 6px; color: #0f172a; }
+        table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+        th, td { border: 1px solid #e2e8f0; padding: 8px 10px; text-align: left; }
+        th { background-color: #f1f5f9; }
+        .log-box { margin-bottom: 20px; }
+        .status-msg { padding: 10px; border-radius: 6px; background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; font-size: 13px; margin-bottom: 16px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Comparación de Tiempo de Acceso: Base de Datos vs Caché</h1>
+        <p class="subtitle">Backend Spring Boot (http://localhost:8080) — Lectura de 10,000 registros</p>
+
+        <div id="statusMsg" class="status-msg">
+            Haz clic en los botones para consultar los 10,000 productos con o sin caché.
+        </div>
+
+        <div class="buttons">
+            <button class="btn-db" onclick="consultar('/sin-cache')">Consultar SIN Caché (BD)</button>
+            <button class="btn-cache" onclick="consultar('/con-cache')">Consultar CON Caché (@Cacheable)</button>
+            <button class="btn-clear" onclick="limpiarCache()">Limpiar Caché (@CacheEvict)</button>
+        </div>
+
+        <div class="stats">
+            <div class="card">
+                <div class="card-label">Último Modo</div>
+                <div id="modoValor" class="card-value">-</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Tiempo de Respuesta</div>
+                <div id="tiempoValor" class="card-value">- ms</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Total Registros Leídos</div>
+                <div id="totalValor" class="card-value">0</div>
+            </div>
+        </div>
+
+        <div class="log-box">
+            <h3>Historial de Pruebas</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Modo de Consulta</th>
+                        <th>Registros Leídos</th>
+                        <th>Tiempo (ms)</th>
+                    </tr>
+                </thead>
+                <tbody id="tablaHistorial"></tbody>
+            </table>
+        </div>
+
+        <div>
+            <h3>Muestra de Registros Recibidos (Primeros 20 de 10,000)</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Código</th>
+                        <th>Nombre</th>
+                        <th>Categoría</th>
+                        <th>Precio</th>
+                        <th>Stock</th>
+                    </tr>
+                </thead>
+                <tbody id="tablaProductos"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = "http://localhost:8080/api/productos";
+        let contador = 0;
+
+        async function consultar(endpoint) {
+            const status = document.getElementById("statusMsg");
+            status.textContent = "Consultando " + API_URL + endpoint + " ...";
+
+            try {
+                const response = await fetch(API_URL + endpoint);
+                const data = await response.json();
+
+                contador++;
+                document.getElementById("modoValor").textContent = data.modo;
+                document.getElementById("tiempoValor").textContent = data.tiempoMs + " ms";
+                document.getElementById("totalValor").textContent = data.totalRegistros;
+                status.textContent = "Consulta completada correctamente en " + data.tiempoMs + " ms.";
+
+                agregarHistorial(contador, data.modo, data.totalRegistros, data.tiempoMs);
+                renderizarProductos(data.muestra);
+            } catch (error) {
+                status.textContent = "Error al conectar con el backend en http://localhost:8080. Asegúrate de que Spring Boot esté ejecutándose.";
+            }
+        }
+
+        async function limpiarCache() {
+            const status = document.getElementById("statusMsg");
+            try {
+                const response = await fetch(API_URL + "/cache", { method: "DELETE" });
+                const data = await response.json();
+                status.textContent = data.mensaje;
+            } catch (error) {
+                status.textContent = "No se pudo conectar al backend para limpiar la caché.";
+            }
+        }
+
+        function agregarHistorial(num, modo, total, tiempo) {
+            const tbody = document.getElementById("tablaHistorial");
+            const fila = document.createElement("tr");
+            fila.innerHTML = `
+                <td>${num}</td>
+                <td>${modo}</td>
+                <td>${total}</td>
+                <td><strong>${tiempo} ms</strong></td>
+            `;
+            tbody.prepend(fila);
+        }
+
+        function renderizarProductos(lista) {
+            const tbody = document.getElementById("tablaProductos");
+            tbody.innerHTML = "";
+            lista.forEach(p => {
+                const fila = document.createElement("tr");
+                fila.innerHTML = `
+                    <td>${p.id}</td>
+                    <td>${p.codigo}</td>
+                    <td>${p.nombre}</td>
+                    <td>${p.categoria}</td>
+                    <td>$${p.precio}</td>
+                    <td>${p.stock}</td>
+                `;
+                tbody.appendChild(fila);
+            });
+        }
+    </script>
+</body>
+</html>
